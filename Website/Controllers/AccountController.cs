@@ -1,15 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Claims;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using Website.Models;
 using Website.Models.AccountViewModels;
 using Website.Services;
@@ -24,18 +28,23 @@ namespace Website.Controllers
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly IEmailSender _emailSender;
         private readonly ILogger _logger;
+        private readonly IConfiguration _config;
 
         public AccountController(
             UserManager<ApplicationUser> userManager,
             SignInManager<ApplicationUser> signInManager,
             IEmailSender emailSender,
-            ILogger<AccountController> logger)
+            ILogger<AccountController> logger, IConfiguration config)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _emailSender = emailSender;
             _logger = logger;
+            _config = config;
         }
+
+
+
 
         [TempData]
         public string ErrorMessage { get; set; }
@@ -50,6 +59,32 @@ namespace Website.Controllers
             ViewData["ReturnUrl"] = returnUrl;
             return View();
         }
+
+        [AllowAnonymous]
+        [HttpPost]
+        public async Task<IActionResult> Token([FromBody]LoginViewModel model)
+        {
+            IActionResult response = Unauthorized();
+            if (ModelState.IsValid)
+            {
+                var result = await _signInManager.PasswordSignInAsync(model.Email, model.Password, model.RememberMe, lockoutOnFailure: false);
+
+                if (result.Succeeded)
+                {
+                    _logger.LogInformation("User logged in.");
+                    var tokenString = BuildToken(null);
+                    response = Ok(new { token = tokenString });
+                }
+                else
+                {
+                    return response;
+                }
+                
+            }
+            
+            return response;
+        }
+
 
         [HttpPost]
         [AllowAnonymous]
@@ -437,6 +472,7 @@ namespace Website.Controllers
             return View();
         }
 
+        
         #region Helpers
 
         private void AddErrors(IdentityResult result)
@@ -457,6 +493,20 @@ namespace Website.Controllers
             {
                 return RedirectToAction(nameof(HomeController.Index), "Home");
             }
+        }
+
+
+        private string BuildToken(ApplicationUser user)
+        {
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+            var token = new JwtSecurityToken(_config["Jwt:Issuer"],
+              _config["Jwt:Issuer"],
+              expires: DateTime.Now.AddMinutes(60),
+              signingCredentials: creds);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
         }
 
         #endregion
